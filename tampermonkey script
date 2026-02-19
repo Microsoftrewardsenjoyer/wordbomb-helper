@@ -1,0 +1,199 @@
+// ==UserScript==
+// @name         Word Finder (Auto, Draggable, Hide Button, No Reuse)
+// @namespace    http://tampermonkey.net/
+// @version      1.4
+// @description  Auto-start word cycler with draggable UI, hide button, and global no-reuse
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // -----------------------------
+    // Load dictionary
+    // -----------------------------
+    const WORDLIST_URL = "https://raw.githubusercontent.com/artzified/WordBombDictionary/refs/heads/main/words.txt";
+    let WORDS = [];
+    let loaded = false;
+
+    GM_xmlhttpRequest({
+        method: "GET",
+        url: WORDLIST_URL,
+        onload: function(response) {
+            WORDS = response.responseText.split("\n").map(w => w.trim().toLowerCase());
+            loaded = true;
+            console.log("Loaded", WORDS.length, "words");
+        }
+    });
+
+    // -----------------------------
+    // Global used-words memory
+    // -----------------------------
+    let USED = new Set();
+
+    // -----------------------------
+    // Per-sequence state
+    // -----------------------------
+    let matches = [];
+    let index = -1;
+    let lastSeq = "";
+    let currentWord = "";
+
+    function findMatches(seq) {
+        seq = seq.toLowerCase();
+
+        return WORDS
+            .filter(w => w.includes(seq) && !USED.has(w))
+            .sort((a, b) => b.length - a.length);
+    }
+
+    // -----------------------------
+    // UI Elements
+    // -----------------------------
+    const box = document.createElement("div");
+    box.style.position = "fixed";
+    box.style.top = "20px";
+    box.style.right = "20px";
+    box.style.padding = "14px";
+    box.style.background = "#1e1e1e";
+    box.style.color = "white";
+    box.style.border = "1px solid #444";
+    box.style.borderRadius = "10px";
+    box.style.zIndex = "999999";
+    box.style.fontFamily = "Segoe UI, Arial";
+    box.style.width = "260px";
+    box.style.boxShadow = "0 4px 12px rgba(0,0,0,0.4)";
+    box.style.transition = "opacity 0.25s ease";
+
+    box.innerHTML = `
+        <div style="font-size:17px; margin-bottom:8px; font-weight:600;">Word Finder</div>
+        <input id="wf_input" type="text" placeholder="Enter sequence..."
+               style="width:100%; padding:7px; border-radius:6px; border:1px solid #555; background:#2c2c2c; color:white; margin-bottom:10px;">
+        <button id="wf_reset_all"
+                style="width:100%; padding:7px; border-radius:6px; background:#444; color:white; border:none; margin-bottom:10px; cursor:pointer;">
+            Reset ALL Used Words
+        </button>
+        <button id="wf_hide"
+                style="width:100%; padding:7px; border-radius:6px; background:#333; color:white; border:none; cursor:pointer;">
+            Hide
+        </button>
+        <div id="wf_result" style="margin-top:10px; font-size:14px; min-height:20px;"></div>
+    `;
+
+    document.body.appendChild(box);
+
+    const input = document.getElementById("wf_input");
+    const result = document.getElementById("wf_result");
+    const btnResetAll = document.getElementById("wf_reset_all");
+    const btnHide = document.getElementById("wf_hide");
+
+    // -----------------------------
+    // Floating Show Button
+    // -----------------------------
+    const showBtn = document.createElement("button");
+    showBtn.textContent = "Show Word Finder";
+    showBtn.style.position = "fixed";
+    showBtn.style.bottom = "20px";
+    showBtn.style.right = "20px";
+    showBtn.style.padding = "10px 14px";
+    showBtn.style.borderRadius = "8px";
+    showBtn.style.background = "#333";
+    showBtn.style.color = "white";
+    showBtn.style.border = "1px solid #555";
+    showBtn.style.cursor = "pointer";
+    showBtn.style.zIndex = "999999";
+    showBtn.style.display = "none";
+    showBtn.style.boxShadow = "0 4px 10px rgba(0,0,0,0.3)";
+    document.body.appendChild(showBtn);
+
+    // -----------------------------
+    // Auto-start logic
+    // -----------------------------
+    function autoStart() {
+        if (!loaded) {
+            result.textContent = "Loading wordlist...";
+            return;
+        }
+
+        const seq = input.value.trim().toLowerCase();
+        if (!seq) {
+            result.textContent = "Enter letters first.";
+            return;
+        }
+
+        if (seq !== lastSeq) {
+            lastSeq = seq;
+            matches = findMatches(seq);
+            index = -1;
+        }
+
+        if (matches.length === 0) {
+            result.textContent = "No unused matches.";
+            currentWord = "";
+            return;
+        }
+
+        index++;
+        if (index >= matches.length) {
+            result.textContent = "No more unused words.";
+            index = matches.length - 1;
+            return;
+        }
+
+        currentWord = matches[index];
+        USED.add(currentWord);
+
+        result.textContent = `${index + 1} / ${matches.length}: ${currentWord}`;
+    }
+
+    // Auto-run whenever input changes
+    input.addEventListener("input", autoStart);
+
+    // -----------------------------
+    // Reset ALL used words
+    // -----------------------------
+    btnResetAll.onclick = () => {
+        USED.clear();
+        matches = [];
+        index = -1;
+        lastSeq = "";
+        currentWord = "";
+        result.textContent = "All used words cleared.";
+    };
+
+    // -----------------------------
+    // Hide / Show UI
+    // -----------------------------
+    btnHide.onclick = () => {
+        box.style.display = "none";
+        showBtn.style.display = "block";
+    };
+
+    showBtn.onclick = () => {
+        box.style.display = "block";
+        showBtn.style.display = "none";
+    };
+
+    // -----------------------------
+    // Make UI draggable
+    // -----------------------------
+    let offsetX = 0, offsetY = 0, dragging = false;
+
+    box.addEventListener("mousedown", e => {
+        dragging = true;
+        offsetX = e.clientX - box.offsetLeft;
+        offsetY = e.clientY - box.offsetTop;
+    });
+
+    document.addEventListener("mousemove", e => {
+        if (dragging) {
+            box.style.left = (e.clientX - offsetX) + "px";
+            box.style.top = (e.clientY - offsetY) + "px";
+            box.style.right = "auto";
+        }
+    });
+
+    document.addEventListener("mouseup", () => dragging = false);
+
+})();
